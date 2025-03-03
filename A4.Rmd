@@ -1,0 +1,224 @@
+---
+title: "RSM456 A4"
+output: html_document
+date: "2025-03-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Q1: First specify two models that you think hold promise for predicting churn in the training data set. In other words, specify two sets of independent variables that you think will be useful for predicting churn. Why did you pick these independent variables, and in what way do you think these independent variables will affect churn. (10 points)
+
+For reference, we will consider retained = 0 to be churn.
+
+**Model 1 (a model focused on customer activity, their engagement, and their purchasing behavior:**
+
+* eopenrate (low email engagement => more likely to churn)
+* eclickrate (low click rate => not interested in company offerings and more likely to churn)
+* avgorder (smaller order sizes => more likely to churn as they may just be testing the service)
+* ordfreq (higher order frequency => less likely to churn as it indicates a habitual buying pattern)
+* refill (if customer has automatic refills => less likely to churn as potentially a habitual buyer)
+* doorstep (potentially less likely to churn as customer has gone out of way to subscribe to this service)
+
+**Model 2 (a model focused on the tenure and recency of customer activity):**
+
+* created (longer time since join date => less likely to churn as they are potentially loyal customers)
+* lastorder(if last order more recent => less likely to churn as potentially signals that they are still active)
+* ordfreq (higher order frequency => less likely to churn as it indicates a habitual buying pattern)
+* favday (fav day signifies that they may be habitually buying on specific days => less likely to churn)
+(The reason I did not include firstorder is because I believe it may be heavily correlated with 'created'. Hence I
+would like to avoid any potential multicollinearity)
+
+
+### Q2: Estimate a linear probability model and a logistic regression using the two sets of independent variables you chose above. Report the R-codes for running these regressions (5 points) and summary tables showing coefficient estimates, standard errors, and significance levels (5 points).
+
+
+```{r}
+library(readxl)
+library(dplyr)
+
+trainData <- read_excel("trainData.xlsx", sheet = 2)
+head(trainData)
+str(trainData)
+
+```
+
+We have to turn 'created' and 'lastorder' from Excel's numeric date format into R date objects. We then converted these
+independent variables to be the number of days since the earliest recorded date (to make it suitable for regression analysis).
+Also, instead of removing NA values, we replaced them with the mean of the column (in accordance with what we learnt in Class 7),
+which helped us prevent data loss by ensuring all observations remain in the model.
+
+
+```{r}
+trainData$created <- as.Date(trainData$created, origin = "1899-12-30")
+trainData$lastorder <- as.Date(trainData$lastorder, origin = "1899-12-30")
+
+trainData$created_days <- as.numeric(difftime(trainData$created, min(trainData$created, na.rm=TRUE), units="days"))
+trainData$lastorder_days <- as.numeric(difftime(trainData$lastorder, min(trainData$lastorder, na.rm=TRUE), units="days"))
+
+trainData$created_days[is.na(trainData$created_days)] <- mean(trainData$created_days, na.rm=TRUE)
+trainData$lastorder_days[is.na(trainData$lastorder_days)] <- mean(trainData$lastorder_days, na.rm=TRUE)
+
+summary(trainData$created_days)
+summary(trainData$lastorder_days)
+
+```
+
+We then processed the favday variable by converting it into dummy variables for regression modeling (basically make it be treated
+as a categorical variable rather than a character string). To elaborate, favday was converted into multiple binary dummy variables, each representing a day of the week (we also removed the original favday variable).
+
+```{r}
+trainData$favday <- as.factor(trainData$favday)
+trainData <- cbind(trainData, model.matrix(~ favday - 1, data = trainData))
+trainData$favday <- NULL
+
+colnames(trainData) <- gsub("favday", "fav_", colnames(trainData))
+str(trainData)
+```
+
+We then ran the linear probability for Model 1 (Customer Activity/Behavior) and for Model 2 (Tenure & Recency) to predict customer retention (retained = 1). We did not include fav_Saturday and fav_Sunday as we reserved them to be reference categories (basically all other days were compared relative to weekend shoppers). To elaborate further, coefficients for fav_Monday to fav_Friday show how much more or less likely those customers are to be retained compared to those who prefer shopping on Saturday/Sunday.
+
+
+```{r}
+lpm_model1 <- lm(retained ~ eopenrate + eclickrate + avgorder + ordfreq + refill + doorstep, data = trainData)
+summary(lpm_model1)
+
+lpm_model2 <- lm(retained ~ created_days + lastorder_days + ordfreq + fav_Monday + fav_Tuesday + fav_Wednesday + fav_Thursday + fav_Friday, data = trainData)
+summary(lpm_model2)
+
+```
+
+We then used Logistic Regression Models for the same two sets of independent variables we used before to predict customer retention (retained = 1).
+
+
+```{r}
+logit_model1 <- glm(retained ~ eopenrate + eclickrate + avgorder + ordfreq + refill + doorstep, 
+                    data = trainData, 
+                    family = binomial)
+summary(logit_model1)
+
+logit_model2 <- glm(retained ~ created_days + lastorder_days + ordfreq + fav_Monday + fav_Tuesday + fav_Wednesday + fav_Thursday + fav_Friday, 
+                    data = trainData, 
+                    family = binomial)
+summary(logit_model2)
+```
+
+
+(For reference, invalid date values such as "1/0/00" or "0000-01-01" were replaced with NA to ensure proper date formatting.)
+
+### Q3: For “custid” HEPCW7, hand-calculate the predicted probability of churn from one of your model specifications using both the linear probability model (5 points) and the logistic regression (15 points). Show your calculations.
+
+
+We first have to extract the coefficients from the regressions we ran in Q2 and also extract the data related to HEPCW7.
+```{r}
+lpm_coefficients <- coef(lpm_model2)
+logit_coefficients <- coef(logit_model2)
+
+hepcw7_data <- trainData %>% filter(custid == "HEPCW7")
+print(hepcw7_data)
+
+```
+
+We then compute the predicted probability of churn using the Linear Probability Model. (Each independent variable is multiplied by its corresponding estimated coefficient)
+```{r}
+lpm_pred <- lpm_coefficients["(Intercept)"] +
+  lpm_coefficients["created_days"] * hepcw7_data$created_days +
+  lpm_coefficients["lastorder_days"] * hepcw7_data$lastorder_days +
+  lpm_coefficients["ordfreq"] * hepcw7_data$ordfreq +
+  lpm_coefficients["fav_Monday"] * hepcw7_data$fav_Monday +
+  lpm_coefficients["fav_Tuesday"] * hepcw7_data$fav_Tuesday +
+  lpm_coefficients["fav_Wednesday"] * hepcw7_data$fav_Wednesday +
+  lpm_coefficients["fav_Thursday"] * hepcw7_data$fav_Thursday +
+  lpm_coefficients["fav_Friday"] * hepcw7_data$fav_Friday
+
+print(paste("Linear Probability Model Prediction:", round(lpm_pred, 4)))
+```
+
+We then have to transform the predicted probability of retention (staying) into the probability of churn. (In this case, the model predicts a 13.54% probablity of churn for HEPCW7)
+```{r}
+lpm_churn_prob <- 1 - lpm_pred
+print(paste("Linear Probability Model - Churn Probability:", round(lpm_churn_prob, 4)))
+```
+
+We then calculate the predicted probability of retention (non-churn) using logistic regression. (For reference, this method ensures that that our probabilities stay between 0 and 1 by applying a logistic transformation)
+```{r}
+logit_linear_combination <- logit_coefficients["(Intercept)"] +
+  logit_coefficients["created_days"] * hepcw7_data$created_days +
+  logit_coefficients["lastorder_days"] * hepcw7_data$lastorder_days +
+  logit_coefficients["ordfreq"] * hepcw7_data$ordfreq +
+  logit_coefficients["fav_Monday"] * hepcw7_data$fav_Monday +
+  logit_coefficients["fav_Tuesday"] * hepcw7_data$fav_Tuesday +
+  logit_coefficients["fav_Wednesday"] * hepcw7_data$fav_Wednesday +
+  logit_coefficients["fav_Thursday"] * hepcw7_data$fav_Thursday +
+  logit_coefficients["fav_Friday"] * hepcw7_data$fav_Friday
+
+logit_pred <- 1 / (1 + exp(-logit_linear_combination))
+print(paste("Logistic Regression Model Prediction:", round(logit_pred, 4)))
+```
+
+We then convert the retention probability we previously calculated into the churn probability.
+```{r}
+logit_churn_prob <- 1 - logit_pred
+print(paste("Logistic Regression Model - Churn Probability:", round(logit_churn_prob, 4)))
+```
+
+
+### Q4: Using R code, generate predicted outcomes (churned versus retained) on the training data for each of your four regressions using a churn-probability threshold of 20%. Report the confusion matrices, and the sensitivity and specificity of each model. (20 points)
+
+(For reference, churn probabilities were derived as 1 - predicted retention probability. We also used ifelse logic to generate binary classification labels for each model. We also manually calculated specificity and sensitivity via direct indexing.)
+```{r}
+trainData$lpm1_pred <- predict(lpm_model1, trainData)
+trainData$lpm2_pred <- predict(lpm_model2, trainData)
+trainData$logit1_pred <- predict(logit_model1, trainData, type = "response")
+trainData$logit2_pred <- predict(logit_model2, trainData, type = "response")
+
+trainData$lpm1_churn_prob <- 1 - trainData$lpm1_pred
+trainData$lpm2_churn_prob <- 1 - trainData$lpm2_pred
+trainData$logit1_churn_prob <- 1 - trainData$logit1_pred
+trainData$logit2_churn_prob <- 1 - trainData$logit2_pred
+
+threshold <- 0.2
+
+trainData$lpm1_pred_class <- as.integer(trainData$lpm1_churn_prob > threshold)
+trainData$lpm2_pred_class <- as.integer(trainData$lpm2_churn_prob > threshold)
+trainData$logit1_pred_class <- as.integer(trainData$logit1_churn_prob > threshold)
+trainData$logit2_pred_class <- as.integer(trainData$logit2_churn_prob > threshold)
+
+trainData$actual_churn <- 1 - trainData$retained
+
+cm_lpm1 <- table(trainData$actual_churn, trainData$lpm1_pred_class)
+cm_lpm2 <- table(trainData$actual_churn, trainData$lpm2_pred_class)
+cm_logit1 <- table(trainData$actual_churn, trainData$logit1_pred_class)
+cm_logit2 <- table(trainData$actual_churn, trainData$logit2_pred_class)
+
+print("Confusion Matrix for LPM Model 1:")
+print(cm_lpm1)
+print("Confusion Matrix for LPM Model 2:")
+print(cm_lpm2)
+print("Confusion Matrix for Logit Model 1:")
+print(cm_logit1)
+print("Confusion Matrix for Logit Model 2:")
+print(cm_logit2)
+
+sensitivity_lpm1 <- cm_lpm1[2,2] / (cm_lpm1[2,2] + cm_lpm1[2,1])  # TP / (TP + FN)
+specificity_lpm1 <- cm_lpm1[1,1] / (cm_lpm1[1,1] + cm_lpm1[1,2])  # TN / (TN + FP)
+
+sensitivity_lpm2 <- cm_lpm2[2,2] / (cm_lpm2[2,2] + cm_lpm2[2,1])
+specificity_lpm2 <- cm_lpm2[1,1] / (cm_lpm2[1,1] + cm_lpm2[1,2])
+
+sensitivity_logit1 <- cm_logit1[2,2] / (cm_logit1[2,2] + cm_logit1[2,1])
+specificity_logit1 <- cm_logit1[1,1] / (cm_logit1[1,1] + cm_logit1[1,2])
+
+sensitivity_logit2 <- cm_logit2[2,2] / (cm_logit2[2,2] + cm_logit2[2,1])
+specificity_logit2 <- cm_logit2[1,1] / (cm_logit2[1,1] + cm_logit2[1,2])
+
+print("Sensitivity and Specificity for Each Model:")
+results <- data.frame(
+  Model = c("LPM Model 1", "LPM Model 2", "Logit Model 1", "Logit Model 2"),
+  Sensitivity = c(sensitivity_lpm1, sensitivity_lpm2, sensitivity_logit1, sensitivity_logit2),
+  Specificity = c(specificity_lpm1, specificity_lpm2, specificity_logit1, specificity_logit2)
+)
+print(results)
+```
