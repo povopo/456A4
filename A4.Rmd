@@ -222,3 +222,91 @@ results <- data.frame(
 )
 print(results)
 ```
+
+### Q5: Discuss the performance of your four regressions in predicting churn outcomes in the training data set. Which two regressions would you short-list for further analysis on the test data? (10 points)
+
+Higher Sensitivity means that the model is better at identifying churners, higher Specificity means that the model is better at identifying retained customers. LPM Model 1 and Logit Model 2 both have higher Sensitivity to Specificity implying that these models are more likely to falsely label retained customers as churners. Whereas LPM Model 2 and Logit Model 2 have higher Specificity than Sensitivity implying that these models are more likely to correctly classify retained customers but miss churners. The two regression models that we would shortlist to achieve the best balance between Sensitivity and Specificity are Logit Models 1 and 2, since logistic regression is preferred for classification problems as it ensures that probabilities stay within [0,1]. Logit Model 1 will detect churners and Logit Model 2 will minimise the false churn predictions.
+
+### Q6: Using the two regressions you identified in the previous question, predict churn in the test data (using the same churn-probability threshold as before). Again, report the confusion matrix, along with sensitivity and specificity. (20 points)
+
+First we need to preprocess the data similarly to data preparation for train data.
+```{r}
+testData$created <- as.Date(testData$created, origin = "1899-12-30")
+testData$lastorder <- as.Date(testData$lastorder, origin = "1899-12-30")
+
+testData$created_days <- as.numeric(difftime(testData$created, min(
+  testData$created, na.rm=TRUE), units="days"))
+testData$lastorder_days <- as.numeric(difftime(testData$lastorder, min(
+  testData$lastorder, na.rm=TRUE), units="days"))
+
+testData$created_days[is.na(testData$created_days)] <- mean(testData$created_days, na.rm=TRUE)
+testData$lastorder_days[is.na(testData$lastorder_days)] <- mean(testData$lastorder_days, na.rm=TRUE)
+
+testData$favday <- as.factor(testData$favday)
+testData <- cbind(testData, model.matrix(~ favday - 1, data = testData))
+testData$favday <- NULL
+
+colnames(testData) <- gsub("favday", "fav_", colnames(testData))
+```
+
+Apply the Logit Models
+```{r}
+testData$logit1_pred <- predict(logit_model1, testData, type = "response")
+testData$logit2_pred <- predict(logit_model2, testData, type = "response")
+
+testData$logit1_churn_prob <- 1 - testData$logit1_pred
+testData$logit2_churn_prob <- 1 - testData$logit2_pred
+
+threshold <- 0.2
+
+testData$logit1_pred_class <- as.integer(testData$logit1_churn_prob > threshold)
+testData$logit2_pred_class <- as.integer(testData$logit2_churn_prob > threshold)
+
+testData$actual_churn <- 1 - testData$retained
+```
+
+Confusion Matrix and Sensitivity and Specificity
+```{r}
+test_cm_logit1 <- table(testData$actual_churn, testData$logit1_pred_class)
+test_cm_logit2 <- table(testData$actual_churn, testData$logit2_pred_class)
+
+print("Confusion Matrix for Test Logit Model 1:")
+print(test_cm_logit1)
+print("Confusion Matrix for Test Logit Model 2:")
+print(test_cm_logit2)
+
+test_sensitivity_logit1 <- test_cm_logit1[2,2] / (test_cm_logit1[2,2] + test_cm_logit1[2,1])
+test_specificity_logit1 <- test_cm_logit1[1,1] / (test_cm_logit1[1,1] + test_cm_logit1[1,2])
+
+test_sensitivity_logit2 <- test_cm_logit2[2,2] / (test_cm_logit2[2,2] + test_cm_logit2[2,1])
+test_specificity_logit2 <- test_cm_logit2[1,1] / (test_cm_logit2[1,1] + test_cm_logit2[1,2])
+
+print("Sensitivity and Specificity for Each Test Model:")
+
+results <- data.frame(
+  Model = c("Test Logit Model 1", "Test Logit Model 2"),
+  Sensitivity = c(sensitivity_logit1, sensitivity_logit2),
+  Specificity = c(specificity_logit1, specificity_logit2)
+)
+print(results)
+```
+
+### Q7: What other data might be useful for improving the performance of your churn model? Why? (10 points)
+
+Some data that could be useful to improve the performance of the churn model is customer service interaction data (e.g. number of customer service inquiries, inquire resolution time, etc), product category preference (do some products have higher retention?), subscription plan users (compared to non subscription plan buyers) and discount sales, brand review ratings (public perseption), etc. All these factors could affect the churn rate, as for example customers with high issue resolution times or repeated complaints are more likely to churn, or subscription plan and discount insintive to come back and buy more. These data sources are erlatively easy to collect and quantify/make appropriate for the regression analysis, if collected and handled properly, and could improve churn predictions.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
